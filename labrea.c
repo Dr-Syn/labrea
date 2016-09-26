@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/time.h> //Req'd for FD_SET, FD_ISSET, FD_ZERO
+#include "litloop.h"
 
 #define PORT 8888 // Listening port to sit the daemon on
 
@@ -24,7 +25,9 @@ int raisebanner(){
 	int client_socket[32], max_clients=32;
 	int activity, i, valread, sd;
 	int max_sd;
-	
+	int fd;
+	char * readFifo = "/tmp/litpipe";
+	char buf[32];
 
 	struct sockaddr_in address;
 
@@ -33,6 +36,7 @@ int raisebanner(){
 	fd_set readfds; // Req'd for socket descriptors
 
 	char *message = "This is the song that doesn't end"; // banner - to start
+	
 
 	
 	//initialize client_socket[] to 0
@@ -73,6 +77,9 @@ int raisebanner(){
 		perror("Listener creation failure");
 		exit(1);
 	}
+	// Initialize read from FIFO
+	fd = open(readFifo, O_RDONLY);
+
 	//Accept inbound connections
 	addrlen = sizeof(address);
 	printf("Connections live. Bring on the pain.\n");
@@ -127,7 +134,7 @@ int raisebanner(){
 				}
 			else { // Send the current message to all open sockets
 				buffer[valread] = '\0'; //Purge the buffer
-				sendto(sd, message, strlen(message), MSG_MORE, NULL, 0);
+				send(fd , message, strlen(message), 0);
 				}
 			}
 		}
@@ -135,19 +142,38 @@ int raisebanner(){
 	return 0;
 }
 
+int literature(){
+	int errval;
+	errval = makePipe();
+	}
+
 
 int main(){
 	
 	pid_t process_id = 0; // Needed for daemonization
 	pid_t sid = 0;
 	int resultid = 0;
+
+	pthread_t litloop;
+	int thread; //thread ID
+	int err;
 	//Dameonize via the standard fork method
 	process_id = fork();
 	if(process_id < 0){
 		perror("Forking failed!");
 		exit(1);
 		}
+	if (process_id > 0){
+		printf("Process ID of child process %d\n", process_id);
+		exit(0);
+		}
 	//Daemonized.
+	
+	err = pthread_create(&(litloop), NULL, &literature, NULL);
+	if (err != 0){
+		perror("Failed to create thread");
+		exit(1);
+		}
 	resultid = raisebanner();
 	return 0;
 }
