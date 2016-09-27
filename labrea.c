@@ -1,149 +1,127 @@
 /* La Brea Daemon */
 
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <sys/time.h> //Req'd for FD_SET, FD_ISSET, FD_ZERO
-#include "litloop.h"
 
-#define PORT 8888 // Listening port to sit the daemon on
+#include "labrea.h"
 
+int make_socket(uint16_t port){
+	int sock;
+	struct sockaddr_in name;
+	//Create the socket
+	sock = socket(PF_INET, SOCK_STREAM, 0);
+	if (sock < 0){
+		perror("Socket creation failed");
+		exit(1);
+		}
+	//Name the socket
+	name.sin_family = AF_INET;
+	name.sin_port = htons(port);
+	name.sin_addr.s_addr = htonl(INADDR_ANY);
+	if(bind(sock,(struct sockaddr *) &name, sizeof(name)) < 0){
+		perror("Binding error");
+		exit(1);
+		}
+	return sock;
+}
 
-int raisebanner();
-
+int read_from_client(int filedes, char c){
+	char buffer[512];
+	int nbytes;
+	nbytes = read(filedes, buffer, 512);
+	if (nbytes < 0){
+		perror("Read error");
+//		send(filedes, &c, sizeof(char), 0);
+		printf("Read error\n");
+		return -1;
+		}
+	else if (nbytes == 0){
+		return(0);
+		}
+	else {
+		//Reading data
+//		send(filedes, &c, sizeof(char), 0);
+		return 0;
+	}
+	send(filedes, &c, sizeof(char), 0);
+}
 
 int raisebanner(){
 	//Variable declarations
-	int opt = 1;
-	int master_socket, addrlen, new_socket;
-	int client_socket[32], max_clients=32;
-	int activity, i, valread, sd;
-	int max_sd;
+	
 	int fd;
 	char * readFifo = "/tmp/litpipe";
 	char buf[32];
 
-	struct sockaddr_in address;
-
-	char buffer[32]; //32 byte buffer - we aren't really using it
-	
+	extern int make_socket(uint16_t port);
+	int sock;
+	fd_set active_fd_set, read_fd_set;
+	int i;
+	struct sockaddr_in clientname;
+	size_t size;
 	fd_set readfds; // Req'd for socket descriptors
+	int new;
 
-	char *message = "This is the song that doesn't end"; // banner - to start
-	
+	FILE *readfile;
+	char character;
 
-	
-	//initialize client_socket[] to 0
-
-	for(i = 0; i < max_clients; i++){
-		client_socket[i] = 0;
-		}
-
-	//Create a master socket
-	if((master_socket = socket(AF_INET, SOCK_STREAM, 0)) == 0){
-		perror("Socket creation failed!");
+	//Create socket & let it accept connections
+	sock = make_socket(PORT);
+	if(listen(sock,1) < 0){
+		perror("Listen error");
 		exit(1);
 		}
-	//Set master socket to allow multiple connections
-	if(setsockopt(master_socket, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) < 0){
-		perror("Setsockopt: REUSEADDR failed");
-		exit(1);
-		}
-	//Set master socket to try to keepalive because we want to consume resources
-	if(setsockopt(master_socket, SOL_SOCKET, SO_KEEPALIVE, (char*)&opt, sizeof(opt)) < 0){
-		perror("Setsockopt: KEEPALIVE failed");
-		exit(1);
-		}
-	//Specify address details
-	address.sin_family = AF_INET;
-	address.sin_addr.s_addr = INADDR_ANY;
-	address.sin_port = htons(PORT); // This is currently set up above
+	//Initialize the set of active sockets
+	FD_ZERO (&active_fd_set);
+	FD_SET(sock, &active_fd_set);
 
-	//Bind the socket to the port
-	if(bind(master_socket, (struct sockaddr *)&address, sizeof(address)) < 0){
-		perror("Binding failed");
-		exit(1);
-	}
-	printf("Listener bound to port %d \n", PORT);
-
-	// Specify max connections for master socket: 3
-	if(listen(master_socket, 3) < 0){
-		perror("Listener creation failure");
-		exit(1);
-	}
 	// Initialize read from FIFO
-	fd = open(readFifo, O_RDONLY);
-
-	//Accept inbound connections
-	addrlen = sizeof(address);
+//	fd = open(readFifo, O_RDONLY);
+	readfile = fopen(readFifo, "r");
 	printf("Connections live. Bring on the pain.\n");
 	while(1){
-		//Clear the socket set
-		FD_ZERO(&readfds);
-		//add the master socket to the set
-		FD_SET(master_socket, &readfds);
-		max_sd = master_socket;
-		//add child sockets
-		for(i = 0; i < max_clients; i++){
-			//Socket descriptor...
-			sd = client_socket[i];
-			if(sd > 0){
-				FD_SET(sd, &readfds);
-				}
-			if(sd > max_sd){
-				max_sd = sd;
-				}
-			}
-		//Wait for activity on the socket with no timeout
-		activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
-		if((activity < 0) && (errno!=EINTR)){
-			perror("Select failure");
-			exit(1);
-		}
-		//And when summat happens.....
-		if(FD_ISSET(master_socket, &readfds)){
-			if((new_socket = accept(master_socket, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0){
-			perror("Accept failure noted");
+		//Grab the character from the pipe
+		character = fgetc(readfile);
+		//Block until input arrives
+		read_fd_set = active_fd_set;
+		if(select(FD_SETSIZE, &read_fd_set, NULL, NULL, NULL) < 0){
+			perror("Select error");	
 			exit(1);
 			}
-		for(i=0; i < max_clients; i++){ //Find an empty place to put this new fellow
-			if(client_socket[i] == 0){
-				client_socket[i] = new_socket;
-				printf("Adding new victim as %d \n", i);
-				break;
-				}
-			}
-		}
-		//Unless it's something un-useful - like closing
-		for(i=0; i < max_clients; i++){
-			sd = client_socket[i];
-			if(FD_ISSET(sd, &readfds)){
-				//Is it closing?
-				if((valread = read(sd, buffer, 32)) == 0){
-					getpeername(sd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
-					printf("IP %s gave up!", inet_ntoa(address.sin_addr));
-					//close socket; mark for reuse
-					close(sd);
-					client_socket[i] = 0;
-				}
-			else { // Send the current message to all open sockets
-				buffer[valread] = '\0'; //Purge the buffer
-				send(fd , message, strlen(message), 0);
+		//Service sockets with inputs
+		for(i = 0; i < FD_SETSIZE; ++i){
+			if (FD_ISSET (i, &read_fd_set)){
+				if (i == sock){
+					printf("Orig sock detected\n");
+					//Connection on orig. socket
+					new = 0;
+					size = sizeof(clientname);
+					new = accept(sock, NULL, NULL);
+					if (new < 0){
+						perror("Accept error");
+						printf("Accept error\n");
+						exit(1);
+						}
+					send(new, &character, sizeof(char), 0);
+					FD_SET (new, &active_fd_set);
+					}
+				else {
+
+				//Data on an established socket
+				if (read_from_client(i, character) < 0) {
+					printf("closing connection\n");
+					close(i);
+					FD_CLR(i, &active_fd_set);
+					}
 				}
 			}
 		}
 	}
+	printf("Stopping\n");
 	return 0;
 }
 
-int literature(){
+void *literature(void * parm){
 	int errval;
+	printf("literature entered\n");
 	errval = makePipe();
 	}
 
@@ -154,10 +132,12 @@ int main(){
 	pid_t sid = 0;
 	int resultid = 0;
 
-	pthread_t litloop;
+	pthread_t litloop[2];
 	int thread; //thread ID
 	int err;
+	printf("Program start\n");
 	//Dameonize via the standard fork method
+
 	process_id = fork();
 	if(process_id < 0){
 		perror("Forking failed!");
@@ -169,7 +149,8 @@ int main(){
 		}
 	//Daemonized.
 	
-	err = pthread_create(&(litloop), NULL, &literature, NULL);
+	err = pthread_create(&(litloop[0]), NULL, &literature, NULL);
+	printf("Err val %d", err);
 	if (err != 0){
 		perror("Failed to create thread");
 		exit(1);

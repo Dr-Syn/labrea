@@ -10,19 +10,21 @@ Each character is made available one at a time on a named pipe.
 int makePipe(){
 	int fd;
 	char * litPipe = "/tmp/litpipe";
+	char buffer[32];
 	FILE *readfile;
 	int c;
 
-	mkfifo(litpipe, 0666);
-	
+	mkfifo(litPipe, 0666);
+	fd = open(litPipe, O_WRONLY);
+	printf("Commencing read\n");
 	if (!(readfile = fopen(MOBY, "rt"))){
 		perror("Unable to open file");
 		exit(1);
 	}
 	while (1) {
 		while ((c = fgetc(readfile)) != EOF){
-			write(fd, c, sizeof(c));
-			usleep(1000000);
+			write(fd, readfile, sizeof(readfile));
+			//usleep(1000000);
 			}
 		rewind(readfile);
 	}
