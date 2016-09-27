@@ -24,7 +24,7 @@ int makePipe(){
 	while (1) {
 		while ((c = fgetc(readfile)) != EOF){
 			write(fd, readfile, sizeof(readfile));
-			//usleep(1000000);
+			usleep(10000);
 			}
 		rewind(readfile);
 	}
